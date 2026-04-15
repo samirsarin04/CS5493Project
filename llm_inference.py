@@ -16,7 +16,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # ── Config ────────────────────────────────────────────────────────────────────
 LOCAL_DATASET = "data/chess_fens.csv"
-MODEL_ID      = "meta-llama/Meta-Llama-3-8B"
+MODEL_ID      = "Qwen/Qwen2.5-7B-Instruct"
 OUTPUT_CSV    = "llm_inference_results.csv"
 FIELDNAMES   = [
     "fen",
@@ -29,14 +29,23 @@ FIELDNAMES   = [
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def build_prompt(fen: str) -> str:
-    return (
-        "You are a world-class chess engine. "
-        "Given a chess position in FEN notation, output ONLY the best move "
-        "in UCI notation (e.g. e2e4, g1f3, e1g1). "
-        "Do not include explanations, punctuation, or any other text.\n\n"
-        f"FEN: {fen}\n"
-        "Best move:"
+def build_prompt(fen: str, tokenizer) -> str:
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a chess engine. You will be given a chess position in FEN notation. "
+                "Your job is to respond with the single best move in UCI format (e.g. e2e4, g1f3, e1g1 for castling). "
+                "Rules:"
+                "- Respond with ONLY the move in UCI format "
+                "- No explanation, no punctuation, no extra text "
+                "- The move must be legal in the given position"
+            ),
+        },
+        {"role": "user", "content": f"FEN: {fen}"},
+    ]
+    return tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
     )
 
 
@@ -132,7 +141,7 @@ def main():
             board = chess.Board(fen)
             side  = board.turn
 
-            prompt   = build_prompt(fen)
+            prompt   = build_prompt(fen, tokenizer)
             new_text = generate_move(model, tokenizer, prompt)
             llm_move = parse_uci_move(new_text)
 
