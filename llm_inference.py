@@ -76,6 +76,11 @@ def generate_move(model, tokenizer, prompt: str) -> str:
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
     inputs = {k: v.to(next(model.parameters()).device) for k, v in inputs.items()}
 
+    stop_ids = [
+        tokenizer.eos_token_id,
+        tokenizer.encode("\n", add_special_tokens=False)[0],
+    ]
+
     with torch.no_grad():
         output_ids = model.generate(
             **inputs,
@@ -84,6 +89,7 @@ def generate_move(model, tokenizer, prompt: str) -> str:
             temperature=None,
             top_p=None,
             pad_token_id=tokenizer.eos_token_id,
+            eos_token_id=stop_ids,
         )
 
     new_tokens = output_ids[0][inputs["input_ids"].shape[1]:]
