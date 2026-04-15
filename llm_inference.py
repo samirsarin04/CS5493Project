@@ -12,13 +12,12 @@ import os
 import re
 import chess
 import torch
-from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DATASET_NAME = "bonna46/Chess-FEN-and-NL-Format-30K-Dataset"
-MODEL_ID     = "meta-llama/Meta-Llama-3-8B"
-OUTPUT_CSV   = "llm_inference_results.csv"
+LOCAL_DATASET = "data/chess_fens.csv"
+MODEL_ID      = "meta-llama/Meta-Llama-3-8B"
+OUTPUT_CSV    = "llm_inference_results.csv"
 FIELDNAMES   = [
     "fen",
     "dataset_next_move",
@@ -65,7 +64,7 @@ def load_model():
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_ID,
         device_map="auto",
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
     )
     model.eval()
     print(f"  Model loaded on {next(model.parameters()).device}", flush=True)
@@ -111,9 +110,10 @@ def main():
 
     model, tokenizer = load_model()
 
-    dataset = load_dataset(DATASET_NAME, split="train")
+    with open(LOCAL_DATASET, newline="", encoding="utf-8") as f:
+        dataset = list(csv.DictReader(f))
     if args.limit:
-        dataset = dataset.select(range(args.limit))
+        dataset = dataset[: args.limit]
 
     with open(args.output, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
