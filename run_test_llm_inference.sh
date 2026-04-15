@@ -5,7 +5,7 @@ set -e
 cd /scratch/general/vast/u0760641/FENStockFish
 mkdir -p logs/slurm
 
-source .venv/bin/activate
+source /scratch/general/vast/u0760641/CS5966-Interpretable-Routing/.venv/bin/activate
 
 export TRANSFORMERS_OFFLINE=1
 export HF_HOME=/scratch/general/vast/$USER/.cache/huggingface
