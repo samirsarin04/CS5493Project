@@ -1,0 +1,21 @@
+============================================================
+LLM ACCURACY vs STOCKFISH BASELINE
+============================================================
+
+Dataset overview
+  Total positions       : 2800
+  LLM valid moves       : 552  (19.7%)
+  LLM invalid moves     : 2248  (80.3%)
+
+Move accuracy  (valid moves only, n=552)
+  LLM matched Stockfish :    27  (4.9%)
+  LLM different move    :   525  (95.1%)
+
+Score delta vs Stockfish baseline  (positive = mover gained)
+  Metric                            Stockfish          LLM
+  ------------------------------------------------------
+  Mean delta                              1.1        407.8
+  Median delta                            0.0         39.0
+  Stdev delta                            24.9      15893.9
+  Min delta                               -91      -100566
+  Stdev gap             : 15893.6
