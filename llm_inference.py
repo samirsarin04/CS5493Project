@@ -1,9 +1,11 @@
 """
-LLM chess move inference using meta-llama/Meta-Llama-3-8B on CHPC cluster.
+LLM chess move inference on fuzzed FEN board states.
 
-Sends the same FEN board states used in the Stockfish run to the LLM and
-records the predicted best move. No Stockfish required — scoring is done
-locally after transferring the output CSV.
+Usage:
+    python llm_inference.py --model qwen25 --output results.csv
+    python llm_inference.py --model llama3  --limit 100
+
+Supported --model values are the keys in MODEL_REGISTRY below.
 """
 
 import argparse
@@ -14,17 +16,22 @@ import chess
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# ── Config ────────────────────────────────────────────────────────────────────
-LOCAL_DATASET = "data/chess_fens.csv"
-MODEL_ID      = "Qwen/Qwen2.5-7B-Instruct"
-OUTPUT_CSV    = "llm_inference_results.csv"
-FIELDNAMES   = [
+# ── Model registry ────────────────────────────────────────────────────────────
+# Keys become the valid --model flag values.
+MODEL_REGISTRY = {
+    "llama1b":  "meta-llama/Llama-3.2-1B",
+    "llama8b":  "meta-llama/Meta-Llama-3-8B",
+    "qwen25":   "Qwen/Qwen2.5-7B-Instruct",
+}
+
+INPUT_CSV  = "data/fuzz_fens.csv"
+FIELDNAMES = [
+    "run",
     "fen",
-    "dataset_next_move",
-    "side_to_move",
-    "llm_raw_output",   # full text the model generated
-    "llm_bestmove",     # parsed UCI move (empty if unparseable)
-    "llm_move_valid",   # True/False — is it a legal move in this position?
+    "model",
+    "llm_raw_output",
+    "llm_bestmove",
+    "llm_move_valid",
 ]
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -52,28 +59,27 @@ def build_prompt(fen: str, tokenizer) -> str:
 UCI_RE = re.compile(r"\b([a-h][1-8][a-h][1-8][qrbn]?)\b")
 
 def parse_uci_move(text: str) -> str:
-    """Extract the first UCI-looking token from model output."""
     m = UCI_RE.search(text.strip().lower())
     return m.group(1) if m else ""
 
 
 # ── Model ─────────────────────────────────────────────────────────────────────
 
-def load_model():
+def load_model(model_id: str):
     hf_home = os.environ.get("HF_HOME")
     if hf_home:
         print(f"  HF_HOME={hf_home}", flush=True)
 
-    print(f"Loading tokenizer: {MODEL_ID} …", flush=True)
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    print(f"Loading tokenizer: {model_id} …", flush=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    print(f"Loading model: {MODEL_ID} …", flush=True)
+    print(f"Loading model: {model_id} …", flush=True)
     model = AutoModelForCausalLM.from_pretrained(
-        MODEL_ID,
+        model_id,
         device_map="auto",
-        dtype=torch.bfloat16,
+        torch_dtype=torch.bfloat16,
     )
     model.eval()
     print(f"  Model loaded on {next(model.parameters()).device}", flush=True)
@@ -81,7 +87,6 @@ def load_model():
 
 
 def generate_move(model, tokenizer, prompt: str) -> str:
-    """Run one greedy completion and return only the newly generated text."""
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
     inputs = {k: v.to(next(model.parameters()).device) for k, v in inputs.items()}
 
@@ -108,65 +113,94 @@ def generate_move(model, tokenizer, prompt: str) -> str:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def parse_args():
-    p = argparse.ArgumentParser(description="LLM chess move inference")
+    p = argparse.ArgumentParser(description="LLM chess move inference on fuzzed FENs")
     p.add_argument(
-        "--limit", type=int, default=None,
-        help="Process only the first N positions (useful for quick tests)."
+        "--model",
+        required=True,
+        choices=list(MODEL_REGISTRY.keys()),
+        help=f"Model to run. Choices: {', '.join(MODEL_REGISTRY.keys())}",
     )
     p.add_argument(
-        "--output", default=OUTPUT_CSV,
-        help=f"Output CSV path (default: {OUTPUT_CSV})."
+        "--input", default=INPUT_CSV,
+        help=f"Input CSV with 'run' and 'fen' columns (default: {INPUT_CSV}).",
+    )
+    p.add_argument(
+        "--output", default=None,
+        help="Output CSV path. Defaults to llm_results_<model>.csv in scratch if $SCRATCH is set, else current dir.",
+    )
+    p.add_argument(
+        "--limit", type=int, default=None,
+        help="Process only the first N positions (useful for quick tests).",
     )
     return p.parse_args()
 
 
+def default_output_path(model_key: str) -> str:
+    scratch = os.environ.get("SCRATCH") or os.environ.get("SLURM_SUBMIT_DIR", ".")
+    return os.path.join(scratch, f"llm_results_{model_key}.csv")
+
+
 def main():
     args = parse_args()
+    model_id  = MODEL_REGISTRY[args.model]
+    out_path  = args.output or default_output_path(args.model)
 
-    model, tokenizer = load_model()
+    print(f"Model key : {args.model}", flush=True)
+    print(f"Model ID  : {model_id}", flush=True)
+    print(f"Input CSV : {args.input}", flush=True)
+    print(f"Output CSV: {out_path}", flush=True)
 
-    with open(LOCAL_DATASET, newline="", encoding="utf-8") as f:
+    model, tokenizer = load_model(model_id)
+
+    with open(args.input, newline="", encoding="utf-8") as f:
         dataset = list(csv.DictReader(f))
     if args.limit:
         dataset = dataset[: args.limit]
 
-    with open(args.output, "w", newline="", encoding="utf-8") as f:
+    print(f"Positions to process: {len(dataset)}", flush=True)
+
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
         writer.writeheader()
 
         for i, row in enumerate(dataset, start=1):
-            fen               = row["FEN"]
-            dataset_next_move = row.get("Next move", "")
+            fen = row["fen"].strip()
+            run = row.get("run", "")
 
-            board = chess.Board(fen)
-            side  = board.turn
+            # Skip invalid FENs that would crash chess.Board
+            try:
+                board = chess.Board(fen)
+            except Exception:
+                writer.writerow({
+                    "run": run, "fen": fen, "model": args.model,
+                    "llm_raw_output": "", "llm_bestmove": "", "llm_move_valid": False,
+                })
+                continue
 
             prompt   = build_prompt(fen, tokenizer)
             new_text = generate_move(model, tokenizer, prompt)
             llm_move = parse_uci_move(new_text)
 
-            move_obj   = None
             move_valid = False
             if llm_move:
                 try:
-                    move_obj   = chess.Move.from_uci(llm_move)
-                    move_valid = move_obj in board.legal_moves
+                    move_valid = chess.Move.from_uci(llm_move) in board.legal_moves
                 except ValueError:
                     pass
 
             writer.writerow({
-                "fen":               fen,
-                "dataset_next_move": dataset_next_move,
-                "side_to_move":      "white" if side else "black",
-                "llm_raw_output":    new_text,
-                "llm_bestmove":      llm_move,
-                "llm_move_valid":    move_valid,
+                "run":            run,
+                "fen":            fen,
+                "model":          args.model,
+                "llm_raw_output": new_text,
+                "llm_bestmove":   llm_move,
+                "llm_move_valid": move_valid,
             })
 
             if i % 100 == 0:
-                print(f"Processed {i} positions", flush=True)
+                print(f"Processed {i}/{len(dataset)}", flush=True)
 
-    print(f"Done. Results written to {args.output}")
+    print(f"Done. Results written to {out_path}", flush=True)
 
 
 if __name__ == "__main__":
