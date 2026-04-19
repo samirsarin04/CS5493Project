@@ -29,7 +29,6 @@ FIELDNAMES = [
     "run",
     "fen",
     "model",
-    "llm_raw_output",
     "llm_bestmove",
     "fen_valid",
     "llm_move_valid",
@@ -52,9 +51,17 @@ def build_prompt(fen: str, tokenizer) -> str:
         },
         {"role": "user", "content": f"FEN: {fen}"},
     ]
-    return tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
+    try:
+        return tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+    except ValueError:
+        # Base models have no chat template — use a plain completion prompt
+        return (
+            "You are a chess engine. Given a chess position in FEN notation, "
+            "respond with only the best move in UCI format (e.g. e2e4). No explanation.\n\n"
+            f"FEN: {fen}\nMove:"
+        )
 
 
 UCI_RE = re.compile(r"\b([a-h][1-8][a-h][1-8][qrbn]?)\b")
@@ -80,7 +87,7 @@ def load_model(model_id: str):
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         device_map="auto",
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
     )
     model.eval()
     print(f"  Model loaded on {next(model.parameters()).device}", flush=True)
@@ -187,7 +194,6 @@ def main():
                 "run":            run,
                 "fen":            fen,
                 "model":          args.model,
-                "llm_raw_output": new_text,
                 "llm_bestmove":   llm_move,
                 "fen_valid":      fen_valid,
                 "llm_move_valid": move_valid,
