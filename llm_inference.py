@@ -31,6 +31,7 @@ FIELDNAMES = [
     "model",
     "llm_raw_output",
     "llm_bestmove",
+    "fen_valid",
     "llm_move_valid",
 ]
 
@@ -167,26 +168,20 @@ def main():
             fen = row["fen"].strip()
             run = row.get("run", "")
 
-            # Skip invalid FENs that would crash chess.Board
-            try:
-                board = chess.Board(fen)
-            except Exception:
-                writer.writerow({
-                    "run": run, "fen": fen, "model": args.model,
-                    "llm_raw_output": "", "llm_bestmove": "", "llm_move_valid": False,
-                })
-                continue
-
             prompt   = build_prompt(fen, tokenizer)
             new_text = generate_move(model, tokenizer, prompt)
             llm_move = parse_uci_move(new_text)
 
+            # Check FEN validity after getting LLM output
+            fen_valid  = False
             move_valid = False
-            if llm_move:
-                try:
+            try:
+                board = chess.Board(fen)
+                fen_valid = True
+                if llm_move:
                     move_valid = chess.Move.from_uci(llm_move) in board.legal_moves
-                except ValueError:
-                    pass
+            except Exception:
+                pass
 
             writer.writerow({
                 "run":            run,
@@ -194,6 +189,7 @@ def main():
                 "model":          args.model,
                 "llm_raw_output": new_text,
                 "llm_bestmove":   llm_move,
+                "fen_valid":      fen_valid,
                 "llm_move_valid": move_valid,
             })
 
