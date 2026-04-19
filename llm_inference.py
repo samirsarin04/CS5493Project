@@ -143,15 +143,18 @@ def parse_args():
     return p.parse_args()
 
 
-def default_output_path(model_key: str) -> str:
+def default_output_path(model_key: str, input_path: str) -> str:
     scratch = os.environ.get("SCRATCH") or os.environ.get("SLURM_SUBMIT_DIR", ".")
-    return os.path.join(scratch, f"llm_results_{model_key}.csv")
+    stem = os.path.splitext(os.path.basename(input_path))[0]  # e.g. "fuzz_fens" or "chaotic_fens"
+    # Strip trailing "_fens" for a cleaner output name, e.g. "fuzz" -> "llm_fuzz_results_qwen25.csv"
+    prefix = stem[:-5] if stem.endswith("_fens") else stem
+    return os.path.join(scratch, f"llm_{prefix}_results_{model_key}.csv")
 
 
 def main():
     args = parse_args()
     model_id  = MODEL_REGISTRY[args.model]
-    out_path  = args.output or default_output_path(args.model)
+    out_path  = args.output or default_output_path(args.model, args.input)
 
     print(f"Model key : {args.model}", flush=True)
     print(f"Model ID  : {model_id}", flush=True)

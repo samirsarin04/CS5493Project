@@ -12,16 +12,17 @@
 #SBATCH --qos=soc-gpu-class-grn
 
 # Usage:
-#   sbatch run_llm_inference.sh llama1b
-#   sbatch run_llm_inference.sh llama8b
 #   sbatch run_llm_inference.sh qwen25
+#   sbatch run_llm_inference.sh qwen25 data/chaotic_fens.csv
 #
 # To submit all three at once:
 #   for m in llama1b llama8b qwen25; do sbatch run_llm_inference.sh $m; done
+#   for m in llama1b llama8b qwen25; do sbatch run_llm_inference.sh $m data/chaotic_fens.csv; done
 
 set -e
 
 MODEL=${1:?"Usage: sbatch run_llm_inference.sh <model>  (llama1b | llama8b | qwen25)"}
+INPUT=${2:-data/fuzz_fens.csv}
 
 cd $SLURM_SUBMIT_DIR
 
@@ -31,11 +32,10 @@ export TRANSFORMERS_OFFLINE=1
 export HF_HOME=/scratch/general/vast/$USER/.cache/huggingface
 export SCRATCH=/scratch/general/vast/$USER
 
-echo "Starting model: $MODEL at $(date)"
+echo "Starting model: $MODEL  input: $INPUT  at $(date)"
 
 python llm_inference.py \
     --model "$MODEL" \
-    --input data/fuzz_fens.csv \
-    --output /scratch/general/vast/$USER/llm_results_${MODEL}.csv
+    --input "$INPUT"
 
 echo "Job finished: $(date)"
