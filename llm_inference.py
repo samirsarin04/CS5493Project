@@ -93,7 +93,6 @@ def load_model(model_id: str, use_pipe: bool):
             "text-generation",
             model=model_id,
             tokenizer=tokenizer,
-            device_map="auto",
         )
         print("  Pipeline model loaded.", flush=True)
         return pipe, tokenizer
