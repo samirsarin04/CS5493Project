@@ -13,15 +13,15 @@
 
 # Usage:
 #   sbatch run_llm_inference.sh qwen25
-#   sbatch run_llm_inference.sh qwen25 data/chaotic_fens.csv
+#   sbatch run_llm_inference.sh chessSLM data/chaotic_fens.csv
 #
-# To submit all three at once:
-#   for m in llama1b llama8b qwen25; do sbatch run_llm_inference.sh $m; done
-#   for m in llama1b llama8b qwen25; do sbatch run_llm_inference.sh $m data/chaotic_fens.csv; done
+# To submit all four at once:
+#   for m in llama1b llama8b qwen25 chessSLM; do sbatch run_llm_inference.sh $m; done
+#   for m in llama1b llama8b qwen25 chessSLM; do sbatch run_llm_inference.sh $m data/chaotic_fens.csv; done
 
 set -e
 
-MODEL=${1:?"Usage: sbatch run_llm_inference.sh <model>  (llama1b | llama8b | qwen25)"}
+MODEL=${1:?"Usage: sbatch run_llm_inference.sh <model>  (llama1b | llama8b | qwen25 | chessSLM)"}
 INPUT=${2:-data/fuzz_fens.csv}
 
 cd $SLURM_SUBMIT_DIR

@@ -14,14 +14,17 @@ import os
 import re
 import chess
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
 # ── Model registry ────────────────────────────────────────────────────────────
-# Keys become the valid --model flag values.
+# "chat": True  → apply_chat_template / greedy decode
+# "chat": False → plain completion prompt / greedy decode
+# "pipe": True  → GPT-2 style pipeline (ChessSLM)
 MODEL_REGISTRY = {
-    "llama1b":  "meta-llama/Llama-3.2-1B",
-    "llama8b":  "meta-llama/Meta-Llama-3-8B",
-    "qwen25":   "Qwen/Qwen2.5-7B-Instruct",
+    "llama1b":  {"id": "meta-llama/Llama-3.2-1B",      "pipe": False},
+    "llama8b":  {"id": "meta-llama/Meta-Llama-3-8B",    "pipe": False},
+    "qwen25":   {"id": "Qwen/Qwen2.5-7B-Instruct",      "pipe": False},
+    "chessSLM": {"id": "FlameF0X/ChessSLM",             "pipe": True},
 }
 
 INPUT_CSV  = "data/fuzz_fens.csv"
@@ -73,7 +76,7 @@ def parse_uci_move(text: str) -> str:
 
 # ── Model ─────────────────────────────────────────────────────────────────────
 
-def load_model(model_id: str):
+def load_model(model_id: str, use_pipe: bool):
     hf_home = os.environ.get("HF_HOME")
     if hf_home:
         print(f"  HF_HOME={hf_home}", flush=True)
@@ -84,6 +87,17 @@ def load_model(model_id: str):
         tokenizer.pad_token = tokenizer.eos_token
 
     print(f"Loading model: {model_id} …", flush=True)
+
+    if use_pipe:
+        pipe = pipeline(
+            "text-generation",
+            model=model_id,
+            tokenizer=tokenizer,
+            device_map="auto",
+        )
+        print("  Pipeline model loaded.", flush=True)
+        return pipe, tokenizer
+
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         device_map="auto",
@@ -94,9 +108,19 @@ def load_model(model_id: str):
     return model, tokenizer
 
 
-def generate_move(model, tokenizer, prompt: str) -> str:
+def generate_move(model_or_pipe, tokenizer, prompt: str, use_pipe: bool) -> str:
+    if use_pipe:
+        response = model_or_pipe(
+            prompt,
+            max_new_tokens=10,
+            temperature=0.1,
+            do_sample=True,
+        )
+        generated = response[0]["generated_text"][len(prompt):].strip()
+        return generated.split()[0] if generated.split() else ""
+
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-    inputs = {k: v.to(next(model.parameters()).device) for k, v in inputs.items()}
+    inputs = {k: v.to(next(model_or_pipe.parameters()).device) for k, v in inputs.items()}
 
     stop_ids = [
         tokenizer.eos_token_id,
@@ -104,7 +128,7 @@ def generate_move(model, tokenizer, prompt: str) -> str:
     ]
 
     with torch.no_grad():
-        output_ids = model.generate(
+        output_ids = model_or_pipe.generate(
             **inputs,
             max_new_tokens=16,
             do_sample=False,
@@ -128,6 +152,7 @@ def parse_args():
         choices=list(MODEL_REGISTRY.keys()),
         help=f"Model to run. Choices: {', '.join(MODEL_REGISTRY.keys())}",
     )
+
     p.add_argument(
         "--input", default=INPUT_CSV,
         help=f"Input CSV with 'run' and 'fen' columns (default: {INPUT_CSV}).",
@@ -153,7 +178,9 @@ def default_output_path(model_key: str, input_path: str) -> str:
 
 def main():
     args = parse_args()
-    model_id  = MODEL_REGISTRY[args.model]
+    registry  = MODEL_REGISTRY[args.model]
+    model_id  = registry["id"]
+    use_pipe  = registry["pipe"]
     out_path  = args.output or default_output_path(args.model, args.input)
 
     print(f"Model key : {args.model}", flush=True)
@@ -161,7 +188,7 @@ def main():
     print(f"Input CSV : {args.input}", flush=True)
     print(f"Output CSV: {out_path}", flush=True)
 
-    model, tokenizer = load_model(model_id)
+    model, tokenizer = load_model(model_id, use_pipe)
 
     with open(args.input, newline="", encoding="utf-8") as f:
         dataset = list(csv.DictReader(f))
@@ -178,8 +205,8 @@ def main():
             fen = row["fen"].strip()
             run = row.get("run", "")
 
-            prompt   = build_prompt(fen, tokenizer)
-            new_text = generate_move(model, tokenizer, prompt)
+            prompt   = fen if use_pipe else build_prompt(fen, tokenizer)
+            new_text = generate_move(model, tokenizer, prompt, use_pipe)
             llm_move = parse_uci_move(new_text)
 
             # Check FEN validity after getting LLM output
