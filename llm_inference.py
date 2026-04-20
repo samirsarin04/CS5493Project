@@ -21,10 +21,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 # "chat": False → plain completion prompt / greedy decode
 # "pipe": True  → GPT-2 style pipeline (ChessSLM)
 MODEL_REGISTRY = {
-    "llama1b":  {"id": "meta-llama/Llama-3.2-1B",      "pipe": False},
-    "llama8b":  {"id": "meta-llama/Meta-Llama-3-8B",    "pipe": False},
-    "qwen25":   {"id": "Qwen/Qwen2.5-7B-Instruct",      "pipe": False},
-    "chessSLM": {"id": "FlameF0X/ChessSLM",             "pipe": True},
+    "llama1b":  {"id": "meta-llama/Llama-3.2-1B",      "pipe": False, "device": None},
+    "llama8b":  {"id": "meta-llama/Meta-Llama-3-8B",    "pipe": False, "device": None},
+    "qwen25":   {"id": "Qwen/Qwen2.5-7B-Instruct",      "pipe": False, "device": None},
+    "chessSLM": {"id": "FlameF0X/ChessSLM",             "pipe": True,  "device": "cpu"},
 }
 
 INPUT_CSV  = "data/fuzz_fens.csv"
@@ -32,6 +32,7 @@ FIELDNAMES = [
     "run",
     "fen",
     "model",
+    "llm_raw_output",
     "llm_bestmove",
     "fen_valid",
     "llm_move_valid",
@@ -76,7 +77,7 @@ def parse_uci_move(text: str) -> str:
 
 # ── Model ─────────────────────────────────────────────────────────────────────
 
-def load_model(model_id: str, use_pipe: bool):
+def load_model(model_id: str, use_pipe: bool, device=None):
     hf_home = os.environ.get("HF_HOME")
     if hf_home:
         print(f"  HF_HOME={hf_home}", flush=True)
@@ -93,8 +94,9 @@ def load_model(model_id: str, use_pipe: bool):
             "text-generation",
             model=model_id,
             tokenizer=tokenizer,
+            device=device,
         )
-        print("  Pipeline model loaded.", flush=True)
+        print(f"  Pipeline model loaded on device={device}.", flush=True)
         return pipe, tokenizer
 
     model = AutoModelForCausalLM.from_pretrained(
@@ -180,6 +182,7 @@ def main():
     registry  = MODEL_REGISTRY[args.model]
     model_id  = registry["id"]
     use_pipe  = registry["pipe"]
+    device    = registry["device"]
     out_path  = args.output or default_output_path(args.model, args.input)
 
     print(f"Model key : {args.model}", flush=True)
@@ -187,7 +190,7 @@ def main():
     print(f"Input CSV : {args.input}", flush=True)
     print(f"Output CSV: {out_path}", flush=True)
 
-    model, tokenizer = load_model(model_id, use_pipe)
+    model, tokenizer = load_model(model_id, use_pipe, device)
 
     with open(args.input, newline="", encoding="utf-8") as f:
         dataset = list(csv.DictReader(f))
@@ -223,6 +226,7 @@ def main():
                 "run":            run,
                 "fen":            fen,
                 "model":          args.model,
+                "llm_raw_output": new_text,
                 "llm_bestmove":   llm_move,
                 "fen_valid":      fen_valid,
                 "llm_move_valid": move_valid,
