@@ -116,6 +116,8 @@ def generate_move(model_or_pipe, tokenizer, prompt: str, use_pipe: bool) -> str:
             max_new_tokens=10,
             temperature=0.1,
             do_sample=True,
+            truncation=True,
+            max_length=1024,
         )
         generated = response[0]["generated_text"][len(prompt):].strip()
         return generated.split()[0] if generated.split() else ""
